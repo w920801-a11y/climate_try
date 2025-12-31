@@ -2,17 +2,19 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { WeatherData, Coordinates } from "../types";
 
-export const fetchWeatherWithAI = async (coords: Coordinates): Promise<WeatherData> => {
+export const fetchWeatherWithAI = async (coords: Coordinates, cityName?: string): Promise<WeatherData> => {
   const apiKey = process.env.API_KEY;
   
   if (!apiKey) {
-    throw new Error("API_KEY_MISSING: 請在 Vercel Environment Variables 中設定 API_KEY");
+    throw new Error("API_KEY_MISSING");
   }
 
   const ai = new GoogleGenAI({ apiKey });
 
+  const locationDesc = cityName ? `城市：${cityName}` : `座標：(${coords.lat}, ${coords.lng})`;
+  
   const prompt = `
-    請查詢座標 (${coords.lat}, ${coords.lng}) 的目前精確天氣及未來 5 天預報。
+    請查詢 ${locationDesc} 的目前精確天氣及未來 5 天預報。
     你是一位專業的氣象主播。請務必返回一個符合以下結構的 JSON 物件（繁體中文）：
     {
       "locationName": "地名（如：台北市信義區）",
@@ -31,6 +33,8 @@ export const fetchWeatherWithAI = async (coords: Coordinates): Promise<WeatherDa
       "clothingAdvice": "穿衣建議",
       "activityAdvice": "活動建議"
     }
+    
+    如果是用經緯度查詢，請盡量推斷具體行政區名稱。
   `;
 
   try {
@@ -44,12 +48,12 @@ export const fetchWeatherWithAI = async (coords: Coordinates): Promise<WeatherDa
     });
 
     const text = response.text;
-    if (!text) throw new Error("AI 未能返回內容");
+    if (!text) throw new Error("Empty AI response");
     
     const parsedData = JSON.parse(text);
     
     const sources = response.candidates?.[0]?.groundingMetadata?.groundingChunks?.map((chunk: any) => ({
-      title: chunk.web?.title || '來源',
+      title: chunk.web?.title || '數據來源',
       uri: chunk.web?.uri || '#'
     })) || [];
 
@@ -59,12 +63,7 @@ export const fetchWeatherWithAI = async (coords: Coordinates): Promise<WeatherDa
       sources: sources
     };
   } catch (error: any) {
-    console.error("Gemini API 錯誤詳情:", error);
-    // 如果是 Google Search Grounding 失敗，嘗試不帶工具重試一次
-    if (error.message?.includes("grounding")) {
-       console.log("重試不帶 Search Grounding...");
-       // 此處可擴充簡易重試邏輯
-    }
+    console.error("Gemini API Error:", error);
     throw error;
   }
 };
