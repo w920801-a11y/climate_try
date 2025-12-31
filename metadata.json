@@ -1,0 +1,7 @@
+{
+  "name": "Gemini 智感天氣助手",
+  "description": "結合 Gemini API 搜索功能與在地定位，提供精準的天氣預報、穿衣建議及活動提醒。",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
