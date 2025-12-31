@@ -2,7 +2,9 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { WeatherData, Coordinates } from "../types";
 
-export const fetchWeatherWithAI = async (coords: Coordinates, cityName?: string): Promise<WeatherData> => {
+const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
+
+export const fetchWeatherWithAI = async (coords: Coordinates, cityName?: string, retries = 1): Promise<WeatherData> => {
   const apiKey = process.env.API_KEY;
   
   if (!apiKey) {
@@ -10,14 +12,13 @@ export const fetchWeatherWithAI = async (coords: Coordinates, cityName?: string)
   }
 
   const ai = new GoogleGenAI({ apiKey });
-
   const locationDesc = cityName ? `城市：${cityName}` : `座標：(${coords.lat}, ${coords.lng})`;
   
   const prompt = `
     請查詢 ${locationDesc} 的目前精確天氣及未來 5 天預報。
     你是一位專業的氣象主播。請務必返回一個符合以下結構的 JSON 物件（繁體中文）：
     {
-      "locationName": "地名（如：台北市信義區）",
+      "locationName": "地名（如：嘉義市）",
       "current": {
         "temp": 數字,
         "condition": "天氣狀況",
@@ -33,8 +34,6 @@ export const fetchWeatherWithAI = async (coords: Coordinates, cityName?: string)
       "clothingAdvice": "穿衣建議",
       "activityAdvice": "活動建議"
     }
-    
-    如果是用經緯度查詢，請盡量推斷具體行政區名稱。
   `;
 
   try {
@@ -63,7 +62,11 @@ export const fetchWeatherWithAI = async (coords: Coordinates, cityName?: string)
       sources: sources
     };
   } catch (error: any) {
-    console.error("Gemini API Error:", error);
+    // 如果是 429 且還有重試次數，等待 2 秒再試一次
+    if (error.message?.includes("429") && retries > 0) {
+      await delay(2000);
+      return fetchWeatherWithAI(coords, cityName, retries - 1);
+    }
     throw error;
   }
 };

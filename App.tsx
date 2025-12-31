@@ -1,9 +1,9 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Cloud, Sun, CloudRain, Wind, Droplets, Thermometer, 
   MapPin, RefreshCw, Info, Shirt, Footprints, Calendar,
-  ExternalLink, AlertCircle, Search, Navigation, ChevronDown, ChevronUp
+  ExternalLink, AlertCircle, Search, Navigation, ChevronDown, ChevronUp, Clock
 } from 'lucide-react';
 import { 
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area 
@@ -13,11 +13,29 @@ import { fetchWeatherWithAI } from './services/geminiService';
 
 const App: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<{message: string, detail?: string, isApiMissing?: boolean} | null>(null);
+  const [error, setError] = useState<{message: string, detail?: string, code?: number} | null>(null);
   const [weatherData, setWeatherData] = useState<WeatherData | null>(null);
   const [location, setLocation] = useState<Coordinates | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showDetail, setShowDetail] = useState(false);
+  
+  // 倒數計時相關
+  const [retryCountdown, setRetryCountdown] = useState<number>(0);
+  const timerRef = useRef<number | null>(null);
+
+  const startCountdown = (seconds: number) => {
+    setRetryCountdown(seconds);
+    if (timerRef.current) window.clearInterval(timerRef.current);
+    timerRef.current = window.setInterval(() => {
+      setRetryCountdown((prev) => {
+        if (prev <= 1) {
+          if (timerRef.current) window.clearInterval(timerRef.current);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
 
   const getWeatherData = useCallback(async (target: Coordinates | string) => {
     setLoading(true);
@@ -29,17 +47,20 @@ const App: React.FC = () => {
       );
       setWeatherData(data);
     } catch (err: any) {
-      console.error("Gemini API Error Detail:", err);
+      console.error("Gemini API Error:", err);
       const errorMsg = err.message || String(err);
       
-      if (errorMsg.includes("API_KEY_MISSING")) {
-        setError({ message: "系統偵測不到 API 金鑰。請確認 Vercel 環境變數已設定且已執行 Redeploy。", isApiMissing: true });
-      } else if (errorMsg.includes("429")) {
-        setError({ message: "API 流量已達上限 (429)。請稍等一分鐘後再試，或檢查您的配額。", detail: errorMsg });
+      if (errorMsg.includes("429")) {
+        setError({ 
+          message: "API 請求太頻繁了 (429)", 
+          detail: "這是因為 Gemini 免費方案對『即時搜尋』有嚴格限制。請休息一分鐘再試，或是前往 Google AI Studio 考慮開啟計費功能來解除限制。",
+          code: 429
+        });
+        startCountdown(60); // 觸發 60 秒倒數
       } else if (errorMsg.includes("403")) {
-        setError({ message: "API 金鑰權限不足 (403)。請確認您的金鑰具備使用 Google Search 的權限。", detail: errorMsg });
+        setError({ message: "金鑰權限錯誤 (403)", detail: "請確認您的 API Key 是否正確。若剛建立 Key，可能需要等待幾分鐘才會生效。", code: 403 });
       } else {
-        setError({ message: "AI 暫時無法處理此請求。可能是輸入名稱有誤，或模型回應格式不正確。", detail: errorMsg });
+        setError({ message: "AI 暫時無法處理此請求", detail: errorMsg });
       }
     } finally {
       setLoading(false);
@@ -48,12 +69,13 @@ const App: React.FC = () => {
 
   const handleManualSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    if (searchQuery.trim()) {
+    if (searchQuery.trim() && retryCountdown === 0) {
       getWeatherData(searchQuery.trim());
     }
   };
 
   const tryGeolocation = () => {
+    if (retryCountdown > 0) return;
     setLoading(true);
     setError(null);
     if (navigator.geolocation) {
@@ -64,19 +86,20 @@ const App: React.FC = () => {
           getWeatherData(coords);
         },
         (err) => {
-          setError({ message: "瀏覽器定位失敗。請檢查權限設定，或直接在下方搜尋城市。" });
+          setError({ message: "定位權限遭拒", detail: "瀏覽器封鎖了定位要求，請手動搜尋城市。" });
           setLoading(false);
         }
       );
     } else {
-      setError({ message: "您的瀏覽器不支援定位功能，請直接搜尋城市。" });
+      setError({ message: "瀏覽器不支援定位", detail: "請直接搜尋城市名稱。" });
       setLoading(false);
     }
   };
 
   useEffect(() => {
     tryGeolocation();
-  }, [getWeatherData]);
+    return () => { if (timerRef.current) window.clearInterval(timerRef.current); };
+  }, []);
 
   const getWeatherIcon = (condition: string) => {
     const c = (condition || '').toLowerCase();
@@ -117,41 +140,64 @@ const App: React.FC = () => {
           <form onSubmit={handleManualSearch} className="relative w-full md:w-80">
             <input 
               type="text" 
-              placeholder="輸入城市名稱 (例如：嘉義、台北)"
+              placeholder={retryCountdown > 0 ? `請稍候 ${retryCountdown} 秒...` : "輸入城市名稱 (例如：嘉義)"}
+              disabled={retryCountdown > 0}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-12 py-3 bg-white border border-slate-200 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-100 shadow-sm transition-all text-slate-700"
+              className={`w-full pl-10 pr-12 py-3 bg-white border border-slate-200 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-100 shadow-sm transition-all text-slate-700 ${retryCountdown > 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
             />
             <Search className="absolute left-3.5 top-3.5 text-slate-400" size={18} />
-            <button type="submit" className="absolute right-2 top-2 px-3 py-1.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition-colors">搜尋</button>
+            <button 
+              type="submit" 
+              disabled={retryCountdown > 0}
+              className={`absolute right-2 top-2 px-3 py-1.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition-colors ${retryCountdown > 0 ? 'bg-slate-400 cursor-not-allowed' : ''}`}
+            >
+              {retryCountdown > 0 ? retryCountdown : '搜尋'}
+            </button>
           </form>
         </div>
 
         {error && (
           <div className="bg-white p-10 rounded-[2.5rem] shadow-xl shadow-red-100/50 border border-red-50 text-center flex flex-col items-center">
-            <AlertCircle className="text-red-500 mb-6" size={48} />
+            {error.code === 429 ? (
+              <div className="w-20 h-20 bg-amber-50 rounded-full flex items-center justify-center mb-6">
+                <Clock className="text-amber-500" size={40} />
+              </div>
+            ) : (
+              <div className="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mb-6">
+                <AlertCircle className="text-red-500" size={40} />
+              </div>
+            )}
+            
             <h2 className="text-xl font-bold text-slate-800 mb-3">{error.message}</h2>
+            <p className="text-slate-500 text-sm max-w-md mb-8 leading-relaxed">
+              {error.detail}
+            </p>
             
             <div className="flex flex-wrap gap-4 justify-center mb-6">
-              <button onClick={tryGeolocation} className="px-8 py-3 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all flex items-center gap-2">
-                <Navigation size={18} /> 重新嘗試
+              <button 
+                onClick={tryGeolocation} 
+                disabled={retryCountdown > 0}
+                className={`px-8 py-3 rounded-2xl font-bold transition-all flex items-center gap-2 shadow-lg ${retryCountdown > 0 ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-200'}`}
+              >
+                {retryCountdown > 0 ? (
+                  <><Clock size={18} /> 冷卻中 ({retryCountdown}s)</>
+                ) : (
+                  <><Navigation size={18} /> 重新嘗試</>
+                )}
               </button>
             </div>
 
-            {error.detail && (
-              <div className="w-full max-w-md">
-                <button 
-                  onClick={() => setShowDetail(!showDetail)}
-                  className="flex items-center gap-1 text-slate-400 text-xs font-bold uppercase tracking-wider mb-2 hover:text-slate-600 transition-colors mx-auto"
-                >
-                  {showDetail ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                  技術診斷細節
-                </button>
-                {showDetail && (
-                  <div className="bg-slate-50 p-4 rounded-xl text-left font-mono text-[10px] text-slate-500 overflow-auto max-h-32 border border-slate-100">
-                    {error.detail}
-                  </div>
-                )}
+            <button 
+              onClick={() => setShowDetail(!showDetail)}
+              className="flex items-center gap-1 text-slate-400 text-xs font-bold uppercase tracking-wider mb-2 hover:text-slate-600 transition-colors mx-auto"
+            >
+              {showDetail ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              技術詳細資訊
+            </button>
+            {showDetail && (
+              <div className="bg-slate-50 p-4 rounded-xl text-left font-mono text-[10px] text-slate-500 overflow-auto max-h-32 border border-slate-100 w-full max-w-md">
+                {error.detail}
               </div>
             )}
           </div>
@@ -159,7 +205,7 @@ const App: React.FC = () => {
 
         {weatherData && (
           <>
-            {/* Current Weather Card */}
+            {/* Weather Card - Same as before but kept for completeness */}
             <div className="bg-white rounded-[2.5rem] shadow-2xl shadow-blue-200/20 overflow-hidden border border-white">
               <div className="p-8 md:p-12">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-10">
@@ -202,6 +248,7 @@ const App: React.FC = () => {
               </div>
             </div>
 
+            {/* Other components remain same... */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-1 space-y-6">
                 <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100">
@@ -236,12 +283,18 @@ const App: React.FC = () => {
                 </div>
               </div>
             </div>
+
+            {weatherData.sources && (
+              <div className="bg-slate-100/50 p-4 rounded-2xl text-[10px] text-slate-400">
+                數據來源：{weatherData.sources.map(s => s.title).join(', ')}
+              </div>
+            )}
           </>
         )}
       </div>
 
       <footer className="mt-16 text-center text-slate-400 text-xs">
-        <p>© 2024 Gemini Weather Assistant • 智感天氣助手</p>
+        <p>© 2024 Gemini Weather Assistant • 智慧生活 氣象先行</p>
       </footer>
     </div>
   );
