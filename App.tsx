@@ -6,14 +6,14 @@ import {
   ExternalLink, AlertCircle
 } from 'lucide-react';
 import { 
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area 
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area 
 } from 'recharts';
 import { WeatherData, Coordinates } from './types';
 import { fetchWeatherWithAI } from './services/geminiService';
 
 const App: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{message: string, isApiMissing?: boolean} | null>(null);
   const [weatherData, setWeatherData] = useState<WeatherData | null>(null);
   const [location, setLocation] = useState<Coordinates | null>(null);
 
@@ -23,8 +23,13 @@ const App: React.FC = () => {
     try {
       const data = await fetchWeatherWithAI(coords);
       setWeatherData(data);
-    } catch (err) {
-      setError("無法取得天氣資訊，請稍後再試。");
+    } catch (err: any) {
+      console.error("應用程式抓取失敗:", err);
+      if (err.message?.includes("API_KEY_MISSING")) {
+        setError({ message: "未檢測到 API 金鑰，請檢查環境變數設定。", isApiMissing: true });
+      } else {
+        setError({ message: "無法取得天氣資訊，可能原因：API 額度已達上限或網路連線問題。" });
+      }
     } finally {
       setLoading(false);
     }
@@ -46,47 +51,44 @@ const App: React.FC = () => {
           getWeatherData(coords);
         },
         (err) => {
-          setError("定位權限遭拒或無法取得位置，請確保已開啟瀏覽器定位功能。");
+          setError({ message: "定位權限遭拒或無法取得位置，請確保已開啟瀏覽器定位功能。" });
           setLoading(false);
         }
       );
     } else {
-      setError("您的瀏覽器不支援定位功能。");
+      setError({ message: "您的瀏覽器不支援定位功能。" });
       setLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [getWeatherData]);
 
   const getWeatherIcon = (condition: string) => {
     const c = condition.toLowerCase();
-    if (c.includes('晴') || c.includes('sun')) return <Sun className="text-amber-400" size={48} />;
-    if (c.includes('雨') || c.includes('rain')) return <CloudRain className="text-blue-400" size={48} />;
+    if (c.includes('晴') || c.includes('sun') || c.includes('clear')) return <Sun className="text-amber-400" size={48} />;
+    if (c.includes('雨') || c.includes('rain') || c.includes('shower')) return <CloudRain className="text-blue-400" size={48} />;
     return <Cloud className="text-slate-400" size={48} />;
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
-        <div className="relative">
-          <RefreshCw className="animate-spin text-blue-600 mb-4" size={48} />
-          <div className="absolute top-0 left-0 w-full h-full flex items-center justify-center">
-            <Cloud className="text-blue-200" size={20} />
-          </div>
-        </div>
-        <h2 className="text-xl font-medium text-slate-700">正在透過 Gemini 分析在地天氣...</h2>
-        <p className="text-slate-500 mt-2">這可能需要幾秒鐘來獲取最準確的數據</p>
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-4 text-center">
+        <RefreshCw className="animate-spin text-blue-600 mb-4" size={48} />
+        <h2 className="text-xl font-medium text-slate-700">正在透過 Gemini 搜尋在地天氣...</h2>
+        <p className="text-slate-500 mt-2 max-w-xs">這包含實時數據檢索與 AI 分析，請稍候</p>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-4">
+      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-4 text-center">
         <AlertCircle className="text-red-500 mb-4" size={64} />
-        <h2 className="text-2xl font-bold text-slate-800">{error}</h2>
+        <h2 className="text-xl font-bold text-slate-800 max-w-sm">{error.message}</h2>
+        {error.isApiMissing && (
+          <p className="mt-2 text-slate-500 text-sm">請前往 Vercel Settings > Environment Variables 設定 API_KEY</p>
+        )}
         <button 
           onClick={() => window.location.reload()}
-          className="mt-6 px-6 py-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition-colors flex items-center gap-2"
+          className="mt-6 px-6 py-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition-colors flex items-center gap-2 mx-auto"
         >
           <RefreshCw size={20} /> 重試一次
         </button>
@@ -112,7 +114,7 @@ const App: React.FC = () => {
             className="flex items-center gap-2 px-4 py-2 bg-white shadow-sm border border-slate-200 rounded-xl text-slate-600 hover:text-blue-600 hover:bg-blue-50 transition-all"
           >
             <RefreshCw size={18} />
-            <span>最後更新 {weatherData?.lastUpdated}</span>
+            <span className="text-sm">最後更新 {weatherData?.lastUpdated}</span>
           </button>
         </div>
 
@@ -127,7 +129,7 @@ const App: React.FC = () => {
                 <div>
                   <div className="text-5xl font-bold text-slate-900 flex items-start">
                     {weatherData?.current.temp}
-                    <span className="text-2xl font-normal text-slate-400 mt-1">°C</span>
+                    <span className="text-2xl font-normal text-slate-400 mt-1 ml-1">°C</span>
                   </div>
                   <div className="text-xl text-slate-600 font-medium mt-1">
                     {weatherData?.current.condition}
@@ -156,7 +158,7 @@ const App: React.FC = () => {
                 </div>
                 <div className="flex flex-col items-center">
                   <div className="flex items-center gap-1.5 text-slate-400 text-sm mb-1">
-                    <Info size={14} /> UV 指數
+                    <Info size={14} /> UV
                   </div>
                   <span className="font-bold text-slate-700">{weatherData?.current.uvIndex}</span>
                 </div>
@@ -175,22 +177,21 @@ const App: React.FC = () => {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Advice Cards */}
           <div className="lg:col-span-1 space-y-6">
-            <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 h-fit">
+            <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
               <div className="flex items-center gap-3 text-emerald-600 mb-4">
                 <Shirt size={22} />
-                <h3 className="font-bold">今日穿衣建議</h3>
+                <h3 className="font-bold">穿衣建議</h3>
               </div>
               <p className="text-slate-600 text-sm leading-relaxed italic">
                 「{weatherData?.clothingAdvice}」
               </p>
             </div>
 
-            <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 h-fit">
+            <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
               <div className="flex items-center gap-3 text-orange-500 mb-4">
                 <Footprints size={22} />
-                <h3 className="font-bold">活動建議</h3>
+                <h3 className="font-bold">活動指南</h3>
               </div>
               <p className="text-slate-600 text-sm leading-relaxed">
                 {weatherData?.activityAdvice}
@@ -198,11 +199,10 @@ const App: React.FC = () => {
             </div>
           </div>
 
-          {/* Forecast Chart */}
-          <div className="lg:col-span-2 bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col">
+          <div className="lg:col-span-2 bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
             <div className="flex items-center gap-3 text-blue-600 mb-6">
               <Calendar size={22} />
-              <h3 className="font-bold">未來 5 天溫度趨勢</h3>
+              <h3 className="font-bold">未來溫度趨勢</h3>
             </div>
             <div className="h-[250px] w-full">
               <ResponsiveContainer width="100%" height="100%">
@@ -218,13 +218,12 @@ const App: React.FC = () => {
                     dataKey="date" 
                     axisLine={false} 
                     tickLine={false} 
-                    tick={{fill: '#94a3b8', fontSize: 12}}
+                    tick={{fill: '#94a3b8', fontSize: 11}}
                     tickFormatter={(val) => val.split('-').slice(1).join('/')}
                   />
                   <YAxis hide domain={['auto', 'auto']} />
                   <Tooltip 
                     contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
-                    itemStyle={{ fontWeight: 'bold' }}
                   />
                   <Area 
                     type="monotone" 
@@ -232,7 +231,6 @@ const App: React.FC = () => {
                     name="最高溫"
                     stroke="#3b82f6" 
                     strokeWidth={3}
-                    fillOpacity={1} 
                     fill="url(#colorHigh)" 
                   />
                   <Area 
@@ -247,44 +245,33 @@ const App: React.FC = () => {
                 </AreaChart>
               </ResponsiveContainer>
             </div>
-            
-            <div className="grid grid-cols-5 gap-2 mt-4">
-              {weatherData?.forecast.map((day, idx) => (
-                <div key={idx} className="flex flex-col items-center py-2 bg-slate-50 rounded-xl">
-                  <span className="text-[10px] text-slate-400 mb-1">{day.date.split('-').slice(1).join('/')}</span>
-                  <div className="my-1 scale-75">
-                    {getWeatherIcon(day.condition)}
-                  </div>
-                  <span className="text-xs font-bold text-slate-700">{day.high}°</span>
-                </div>
+          </div>
+        </div>
+
+        {weatherData?.sources && weatherData.sources.length > 0 && (
+          <div className="bg-slate-100/50 p-4 rounded-2xl border border-dashed border-slate-200">
+            <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+              <Info size={12} /> Google Search 數據來源
+            </h4>
+            <div className="flex flex-wrap gap-x-4 gap-y-2">
+              {weatherData.sources.map((source, idx) => (
+                <a 
+                  key={idx} 
+                  href={source.uri} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-[10px] text-slate-500 hover:text-blue-600 flex items-center gap-1 bg-white px-2 py-1 rounded-md border border-slate-200"
+                >
+                  {source.title.substring(0, 20)}... <ExternalLink size={8} />
+                </a>
               ))}
             </div>
           </div>
-        </div>
-
-        {/* Search Grounding Sources */}
-        <div className="bg-slate-100/50 p-4 rounded-2xl border border-dashed border-slate-200">
-          <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-            <Info size={12} /> 數據來源 (由 Google 搜索增強)
-          </h4>
-          <div className="flex flex-wrap gap-x-6 gap-y-2">
-            {weatherData?.sources.map((source, idx) => (
-              <a 
-                key={idx} 
-                href={source.uri} 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="text-xs text-slate-500 hover:text-blue-600 flex items-center gap-1 transition-colors"
-              >
-                {source.title} <ExternalLink size={10} />
-              </a>
-            ))}
-          </div>
-        </div>
+        )}
       </div>
 
-      <footer className="mt-12 text-center text-slate-400 text-sm">
-        <p>© 2024 Gemini Weather Assistant • Powered by Google Gemini 3 Flash</p>
+      <footer className="mt-12 text-center text-slate-400 text-[10px]">
+        <p>© 2024 Gemini Weather • 實時搜尋增強型氣象助手</p>
       </footer>
     </div>
   );
