@@ -4,6 +4,23 @@ import { WeatherData, Coordinates } from "../types";
 
 const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 
+// 測試 API 是否存活（不使用搜尋工具，避免浪費搜尋額度）
+export const testApiConnection = async (): Promise<boolean> => {
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) return false;
+  try {
+    const ai = new GoogleGenAI({ apiKey });
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: "Hi, respond with 'OK' if you can hear me.",
+    });
+    return response.text.includes("OK");
+  } catch (e) {
+    console.error("Test connection failed:", e);
+    return false;
+  }
+};
+
 export const fetchWeatherWithAI = async (coords: Coordinates, cityName?: string, retries = 1): Promise<WeatherData> => {
   const apiKey = process.env.API_KEY;
   
@@ -11,6 +28,7 @@ export const fetchWeatherWithAI = async (coords: Coordinates, cityName?: string,
     throw new Error("API_KEY_MISSING");
   }
 
+  // 使用 gemini-3-pro-preview，對於工具調用通常更穩定
   const ai = new GoogleGenAI({ apiKey });
   const locationDesc = cityName ? `城市：${cityName}` : `座標：(${coords.lat}, ${coords.lng})`;
   
@@ -38,7 +56,8 @@ export const fetchWeatherWithAI = async (coords: Coordinates, cityName?: string,
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      // 切換至效能更強大的 Pro 預覽版，有助於解決某些工具調用限制
+      model: "gemini-3-pro-preview",
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }],
@@ -47,12 +66,12 @@ export const fetchWeatherWithAI = async (coords: Coordinates, cityName?: string,
     });
 
     const text = response.text;
-    if (!text) throw new Error("Empty AI response");
+    if (!text) throw new Error("AI 回應為空，請稍後再試。");
     
     const parsedData = JSON.parse(text);
     
     const sources = response.candidates?.[0]?.groundingMetadata?.groundingChunks?.map((chunk: any) => ({
-      title: chunk.web?.title || '數據來源',
+      title: chunk.web?.title || '氣象資料來源',
       uri: chunk.web?.uri || '#'
     })) || [];
 
@@ -62,9 +81,10 @@ export const fetchWeatherWithAI = async (coords: Coordinates, cityName?: string,
       sources: sources
     };
   } catch (error: any) {
-    // 如果是 429 且還有重試次數，等待 2 秒再試一次
-    if (error.message?.includes("429") && retries > 0) {
-      await delay(2000);
+    const errorMsg = error.message || String(error);
+    // 如果是 429 且還有重試次數，等待 3 秒再試一次
+    if (errorMsg.includes("429") && retries > 0) {
+      await delay(3000);
       return fetchWeatherWithAI(coords, cityName, retries - 1);
     }
     throw error;

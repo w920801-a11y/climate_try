@@ -3,23 +3,22 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Cloud, Sun, CloudRain, Wind, Droplets, Thermometer, 
   MapPin, RefreshCw, Info, Shirt, Footprints, Calendar,
-  ExternalLink, AlertCircle, Search, Navigation, ChevronDown, ChevronUp, Clock
+  ExternalLink, AlertCircle, Search, Navigation, ChevronDown, ChevronUp, Clock, CheckCircle2, ShieldAlert
 } from 'lucide-react';
 import { 
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area 
 } from 'recharts';
 import { WeatherData, Coordinates } from './types';
-import { fetchWeatherWithAI } from './services/geminiService';
+import { fetchWeatherWithAI, testApiConnection } from './services/geminiService';
 
 const App: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<{message: string, detail?: string, code?: number} | null>(null);
+  const [error, setError] = useState<{message: string, detail?: string, code?: number, type?: 'quota' | 'auth' | 'general'} | null>(null);
   const [weatherData, setWeatherData] = useState<WeatherData | null>(null);
-  const [location, setLocation] = useState<Coordinates | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showDetail, setShowDetail] = useState(false);
+  const [diagStatus, setDiagStatus] = useState<'idle' | 'testing' | 'success' | 'failed'>('idle');
   
-  // 倒數計時相關
   const [retryCountdown, setRetryCountdown] = useState<number>(0);
   const timerRef = useRef<number | null>(null);
 
@@ -37,6 +36,12 @@ const App: React.FC = () => {
     }, 1000);
   };
 
+  const handleDiagnostic = async () => {
+    setDiagStatus('testing');
+    const ok = await testApiConnection();
+    setDiagStatus(ok ? 'success' : 'failed');
+  };
+
   const getWeatherData = useCallback(async (target: Coordinates | string) => {
     setLoading(true);
     setError(null);
@@ -52,15 +57,21 @@ const App: React.FC = () => {
       
       if (errorMsg.includes("429")) {
         setError({ 
-          message: "API 請求太頻繁了 (429)", 
-          detail: "這是因為 Gemini 免費方案對『即時搜尋』有嚴格限制。請休息一分鐘再試，或是前往 Google AI Studio 考慮開啟計費功能來解除限制。",
-          code: 429
+          message: "API 額度已用盡 (429)", 
+          detail: "這通常代表您帳號的『Google 搜尋工具』今日配額已達上限。Gemini 免費版每日搜尋次數非常有限。",
+          code: 429,
+          type: 'quota'
         });
-        startCountdown(60); // 觸發 60 秒倒數
+        startCountdown(60);
       } else if (errorMsg.includes("403")) {
-        setError({ message: "金鑰權限錯誤 (403)", detail: "請確認您的 API Key 是否正確。若剛建立 Key，可能需要等待幾分鐘才會生效。", code: 403 });
+        setError({ 
+          message: "金鑰權限錯誤 (403)", 
+          detail: "API Key 可能失效或未開啟 Search Grounding 權限。", 
+          code: 403,
+          type: 'auth'
+        });
       } else {
-        setError({ message: "AI 暫時無法處理此請求", detail: errorMsg });
+        setError({ message: "系統暫時無法回應", detail: errorMsg, type: 'general' });
       }
     } finally {
       setLoading(false);
@@ -82,11 +93,10 @@ const App: React.FC = () => {
       navigator.geolocation.getCurrentPosition(
         (position) => {
           const coords = { lat: position.coords.latitude, lng: position.coords.longitude };
-          setLocation(coords);
           getWeatherData(coords);
         },
         (err) => {
-          setError({ message: "定位權限遭拒", detail: "瀏覽器封鎖了定位要求，請手動搜尋城市。" });
+          setError({ message: "定位權限遭拒", detail: "請手動搜尋城市。" });
           setLoading(false);
         }
       );
@@ -112,8 +122,8 @@ const App: React.FC = () => {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-4 text-center">
         <RefreshCw className="animate-spin text-blue-600 mb-4" size={56} />
-        <h2 className="text-xl font-bold text-slate-700">Gemini 正在搜尋即時氣象...</h2>
-        <p className="text-slate-500 mt-2 max-w-xs animate-pulse">正在整合 Google 搜尋數據與 AI 分析</p>
+        <h2 className="text-xl font-bold text-slate-700">正在透過 AI 搜尋最新氣象...</h2>
+        <p className="text-slate-500 mt-2 max-w-xs animate-pulse">第一次連線可能較慢，請耐心等候</p>
       </div>
     );
   }
@@ -140,7 +150,7 @@ const App: React.FC = () => {
           <form onSubmit={handleManualSearch} className="relative w-full md:w-80">
             <input 
               type="text" 
-              placeholder={retryCountdown > 0 ? `請稍候 ${retryCountdown} 秒...` : "輸入城市名稱 (例如：嘉義)"}
+              placeholder={retryCountdown > 0 ? `冷卻中 ${retryCountdown}s...` : "輸入城市 (如：嘉義)"}
               disabled={retryCountdown > 0}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -158,55 +168,60 @@ const App: React.FC = () => {
         </div>
 
         {error && (
-          <div className="bg-white p-10 rounded-[2.5rem] shadow-xl shadow-red-100/50 border border-red-50 text-center flex flex-col items-center">
-            {error.code === 429 ? (
-              <div className="w-20 h-20 bg-amber-50 rounded-full flex items-center justify-center mb-6">
-                <Clock className="text-amber-500" size={40} />
-              </div>
-            ) : (
-              <div className="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mb-6">
-                <AlertCircle className="text-red-500" size={40} />
-              </div>
-            )}
-            
-            <h2 className="text-xl font-bold text-slate-800 mb-3">{error.message}</h2>
-            <p className="text-slate-500 text-sm max-w-md mb-8 leading-relaxed">
-              {error.detail}
+          <div className="bg-white p-10 rounded-[2.5rem] shadow-xl shadow-red-100/50 border border-red-50 flex flex-col items-center">
+            <ShieldAlert className="text-red-500 mb-6" size={56} />
+            <h2 className="text-2xl font-black text-slate-800 mb-3">{error.message}</h2>
+            <p className="text-slate-500 text-center max-w-lg mb-8 leading-relaxed">
+              {error.type === 'quota' ? (
+                <>
+                  偵測到 API 頻率限制。這代表您的 <b>Google 搜尋功能</b> 免費額度今日已用完。
+                  您可以嘗試點擊下方的「連線診斷」來確認 API Key 本身是否正常。
+                </>
+              ) : error.detail}
             </p>
             
-            <div className="flex flex-wrap gap-4 justify-center mb-6">
+            <div className="flex flex-col gap-4 w-full max-w-sm">
               <button 
                 onClick={tryGeolocation} 
                 disabled={retryCountdown > 0}
-                className={`px-8 py-3 rounded-2xl font-bold transition-all flex items-center gap-2 shadow-lg ${retryCountdown > 0 ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-200'}`}
+                className={`w-full py-4 rounded-2xl font-bold transition-all flex items-center justify-center gap-2 shadow-lg ${retryCountdown > 0 ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-200'}`}
               >
-                {retryCountdown > 0 ? (
-                  <><Clock size={18} /> 冷卻中 ({retryCountdown}s)</>
-                ) : (
-                  <><Navigation size={18} /> 重新嘗試</>
-                )}
+                {retryCountdown > 0 ? <><Clock size={18} /> 冷卻中 ({retryCountdown}s)</> : <><Navigation size={18} /> 再次嘗試搜尋天氣</>}
               </button>
-            </div>
 
-            <button 
-              onClick={() => setShowDetail(!showDetail)}
-              className="flex items-center gap-1 text-slate-400 text-xs font-bold uppercase tracking-wider mb-2 hover:text-slate-600 transition-colors mx-auto"
-            >
-              {showDetail ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-              技術詳細資訊
-            </button>
-            {showDetail && (
-              <div className="bg-slate-50 p-4 rounded-xl text-left font-mono text-[10px] text-slate-500 overflow-auto max-h-32 border border-slate-100 w-full max-w-md">
-                {error.detail}
+              <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200">
+                <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                  <Info size={14} /> API 健康診斷
+                </h4>
+                <div className="flex items-center justify-between gap-4">
+                  <div className="text-sm font-medium text-slate-600">
+                    {diagStatus === 'idle' && '點擊測試 API 本身是否活著'}
+                    {diagStatus === 'testing' && '正在與 Gemini 通訊...'}
+                    {diagStatus === 'success' && <span className="text-emerald-600 flex items-center gap-1"><CheckCircle2 size={16} /> API 連線正常</span>}
+                    {diagStatus === 'failed' && <span className="text-red-600 flex items-center gap-1"><AlertCircle size={16} /> 連線失敗</span>}
+                  </div>
+                  <button 
+                    onClick={handleDiagnostic}
+                    disabled={diagStatus === 'testing'}
+                    className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold hover:bg-slate-50 transition-colors disabled:opacity-50"
+                  >
+                    開始測試
+                  </button>
+                </div>
+                {diagStatus === 'success' && error.type === 'quota' && (
+                  <div className="mt-4 p-3 bg-amber-50 text-amber-700 text-[11px] leading-relaxed rounded-xl border border-amber-100">
+                    診斷結果：您的 API Key 運作正常，但 <b>Google Search 配額</b> 已達免費上限。請至 Google AI Studio 開啟計費方案或換一個新專案的 Key。
+                  </div>
+                )}
               </div>
-            )}
+            </div>
           </div>
         )}
 
         {weatherData && (
-          <>
-            {/* Weather Card - Same as before but kept for completeness */}
-            <div className="bg-white rounded-[2.5rem] shadow-2xl shadow-blue-200/20 overflow-hidden border border-white">
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
+            {/* Current Weather Card */}
+            <div className="bg-white rounded-[2.5rem] shadow-2xl shadow-blue-200/20 overflow-hidden border border-white mb-6">
               <div className="p-8 md:p-12">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-10">
                   <div className="flex items-center gap-8">
@@ -224,50 +239,49 @@ const App: React.FC = () => {
 
                   <div className="grid grid-cols-2 gap-6 md:flex md:gap-10 border-t md:border-t-0 md:border-l border-slate-100 pt-8 md:pt-0 md:pl-12">
                     <div className="flex flex-col items-center">
-                      <div className="flex items-center gap-1.5 text-slate-400 text-xs font-bold mb-2 uppercase tracking-widest"><Thermometer size={14} /> 體感</div>
+                      <div className="text-slate-400 text-[10px] font-black mb-2 uppercase tracking-widest">體感</div>
                       <span className="text-2xl font-black text-slate-700">{weatherData.current.feelsLike}°</span>
                     </div>
                     <div className="flex flex-col items-center">
-                      <div className="flex items-center gap-1.5 text-slate-400 text-xs font-bold mb-2 uppercase tracking-widest"><Droplets size={14} /> 濕度</div>
+                      <div className="text-slate-400 text-[10px] font-black mb-2 uppercase tracking-widest">濕度</div>
                       <span className="text-2xl font-black text-slate-700">{weatherData.current.humidity}%</span>
                     </div>
                     <div className="flex flex-col items-center">
-                      <div className="flex items-center gap-1.5 text-slate-400 text-xs font-bold mb-2 uppercase tracking-widest"><Wind size={14} /> 風速</div>
+                      <div className="text-slate-400 text-[10px] font-black mb-2 uppercase tracking-widest">風速</div>
                       <span className="text-2xl font-black text-slate-700">{weatherData.current.windSpeed}</span>
                     </div>
                     <div className="flex flex-col items-center">
-                      <div className="flex items-center gap-1.5 text-slate-400 text-xs font-bold mb-2 uppercase tracking-widest"><Info size={14} /> UV</div>
+                      <div className="text-slate-400 text-[10px] font-black mb-2 uppercase tracking-widest">UV</div>
                       <span className="text-2xl font-black text-slate-700">{weatherData.current.uvIndex}</span>
                     </div>
                   </div>
                 </div>
               </div>
               <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-8 flex items-start gap-5">
-                <Info className="text-white mt-1" size={24} />
+                <Info className="text-white mt-1 shrink-0" size={24} />
                 <p className="text-white text-lg leading-relaxed font-medium">{weatherData.aiInsight}</p>
               </div>
             </div>
 
-            {/* Other components remain same... */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-1 space-y-6">
                 <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100">
-                  <div className="flex items-center gap-3 text-emerald-600 mb-5">
-                    <Shirt size={22} /> <h3 className="font-black text-lg">穿衣建議</h3>
+                  <div className="flex items-center gap-3 text-emerald-600 mb-5 font-black">
+                    <Shirt size={22} /> 穿衣建議
                   </div>
                   <p className="text-slate-600 leading-relaxed italic">「{weatherData.clothingAdvice}」</p>
                 </div>
                 <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100">
-                  <div className="flex items-center gap-3 text-orange-500 mb-5">
-                    <Footprints size={22} /> <h3 className="font-black text-lg">活動指南</h3>
+                  <div className="flex items-center gap-3 text-orange-500 mb-5 font-black">
+                    <Footprints size={22} /> 活動指南
                   </div>
                   <p className="text-slate-600 leading-relaxed">{weatherData.activityAdvice}</p>
                 </div>
               </div>
 
               <div className="lg:col-span-2 bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100">
-                <div className="flex items-center gap-3 text-blue-600 mb-8">
-                  <Calendar size={22} /> <h3 className="font-black text-lg">氣溫趨勢</h3>
+                <div className="flex items-center gap-3 text-blue-600 mb-8 font-black">
+                  <Calendar size={22} /> 5 天氣溫趨勢
                 </div>
                 <div className="h-[250px] w-full">
                   <ResponsiveContainer width="100%" height="100%">
@@ -276,25 +290,19 @@ const App: React.FC = () => {
                       <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 12}} tickFormatter={(val) => val.split('-').slice(1).join('/')} />
                       <YAxis hide domain={['auto', 'auto']} />
                       <Tooltip contentStyle={{ borderRadius: '20px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.05)' }} />
-                      <Area type="monotone" dataKey="high" name="最高" stroke="#3b82f6" strokeWidth={4} fill="#3b82f6" fillOpacity={0.1} />
+                      <Area type="monotone" dataKey="high" name="最高" stroke="#3b82f6" strokeWidth={4} fill="#3b82f6" fillOpacity={0.05} />
                       <Area type="monotone" dataKey="low" name="最低" stroke="#94a3b8" strokeWidth={2} strokeDasharray="6 6" fill="transparent" />
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
               </div>
             </div>
-
-            {weatherData.sources && (
-              <div className="bg-slate-100/50 p-4 rounded-2xl text-[10px] text-slate-400">
-                數據來源：{weatherData.sources.map(s => s.title).join(', ')}
-              </div>
-            )}
-          </>
+          </div>
         )}
       </div>
 
-      <footer className="mt-16 text-center text-slate-400 text-xs">
-        <p>© 2024 Gemini Weather Assistant • 智慧生活 氣象先行</p>
+      <footer className="mt-16 text-center text-slate-400 text-[10px] font-bold uppercase tracking-widest">
+        <p>© 2024 Gemini Weather Assistant • 智感氣象助手</p>
       </footer>
     </div>
   );
