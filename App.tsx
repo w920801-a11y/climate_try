@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Cloud, Sun, CloudRain, Wind, Droplets, MapPin, RefreshCw, Info, Shirt, Footprints, 
-  Search, ChevronDown, ChevronUp, CheckCircle2, ShieldAlert, Key, Copy, Globe, ExternalLink, Sparkles, AlertTriangle, AlertCircle, ZapOff
+  Search, ChevronDown, ChevronUp, CheckCircle2, ShieldAlert, Key, Copy, Globe, ExternalLink, Sparkles, AlertTriangle, AlertCircle, ZapOff, Zap
 } from 'lucide-react';
 import { WeatherData, Coordinates } from './types';
 import { fetchWeatherWithAI, testApiConnection } from './services/geminiService';
@@ -12,10 +12,12 @@ const App: React.FC = () => {
   const [error, setError] = useState<{message: string, detail?: string, code?: number, type?: 'quota' | 'auth' | 'not_found' | 'general'} | null>(null);
   const [weatherData, setWeatherData] = useState<(WeatherData & { isRealtime: boolean }) | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [lastTarget, setLastTarget] = useState<Coordinates | string | null>(null);
   
   const getWeatherData = useCallback(async (target: Coordinates | string) => {
     setLoading(true);
     setError(null);
+    setLastTarget(target);
     try {
       const data = await fetchWeatherWithAI(
         typeof target === 'string' ? { lat: 0, lng: 0 } : target, 
@@ -76,7 +78,7 @@ const App: React.FC = () => {
             </div>
             <div>
               <h1 className="text-xl font-black text-slate-800 tracking-tight">智感天氣預報</h1>
-              <span className="text-[10px] font-bold bg-slate-100 px-2 py-0.5 rounded-full text-slate-400">v2.0韌性版</span>
+              <span className="text-[10px] font-bold bg-slate-100 px-2 py-0.5 rounded-full text-slate-400">v2.1韌性版</span>
             </div>
           </div>
           <form onSubmit={(e) => { e.preventDefault(); getWeatherData(searchQuery); }} className="relative w-full md:w-72">
@@ -114,12 +116,20 @@ const App: React.FC = () => {
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
             {/* 降級模式提示 */}
             {!weatherData.isRealtime && (
-              <div className="bg-amber-50 border border-amber-200 p-5 rounded-[2rem] mb-8 flex items-start gap-4 text-amber-900">
-                <div className="bg-amber-400/20 p-2 rounded-xl shrink-0"><ZapOff size={20} /></div>
-                <div>
-                  <p className="font-black text-sm mb-1">配額限制模式</p>
-                  <p className="text-xs opacity-80 leading-relaxed font-medium">目前 Google 搜尋工具已達上限，系統已自動切換至「AI 預測模式」。資料為 AI 根據歷史規律產生，若要恢復即時查詢，請於 24 小時後再試。</p>
+              <div className="bg-amber-50 border border-amber-200 p-5 rounded-[2rem] mb-8 flex flex-col md:flex-row items-center justify-between gap-4 text-amber-900">
+                <div className="flex items-start gap-4">
+                  <div className="bg-amber-400/20 p-2 rounded-xl shrink-0"><ZapOff size={20} /></div>
+                  <div>
+                    <p className="font-black text-sm mb-1">配額限制模式 (AI 預測中)</p>
+                    <p className="text-xs opacity-80 leading-relaxed font-medium">目前搜尋次數已達上限。若您已等待一段時間，可嘗試點擊右側按鈕恢復即時更新。</p>
+                  </div>
                 </div>
+                <button 
+                  onClick={() => lastTarget && getWeatherData(lastTarget)}
+                  className="shrink-0 flex items-center gap-2 px-6 py-3 bg-amber-500 text-white rounded-2xl font-black text-xs hover:bg-amber-600 transition-all shadow-lg shadow-amber-200"
+                >
+                  <Zap size={14} fill="currentColor" /> 嘗試即時更新
+                </button>
               </div>
             )}
 
@@ -128,7 +138,10 @@ const App: React.FC = () => {
                 <div className="flex items-center gap-8">
                   <div className="p-7 bg-slate-50 rounded-[2.5rem] shadow-inner">{getWeatherIcon(weatherData.current.condition)}</div>
                   <div>
-                    <h2 className="text-7xl font-black text-slate-900 leading-none tracking-tighter">{weatherData.current.temp}°C</h2>
+                    <div className="flex items-baseline gap-2">
+                      <h2 className="text-7xl font-black text-slate-900 leading-none tracking-tighter">{weatherData.current.temp}°C</h2>
+                      {weatherData.isRealtime && <div className="w-3 h-3 bg-emerald-500 rounded-full animate-pulse shadow-lg shadow-emerald-200" title="即時連線中"></div>}
+                    </div>
                     <p className="text-slate-400 font-bold mt-4 text-xl tracking-wide">{weatherData.current.condition}</p>
                     <div className="flex items-center gap-2 text-blue-600 text-sm mt-3 font-black bg-blue-50 px-3 py-1.5 rounded-full w-fit">
                       <MapPin size={14} /> {weatherData.locationName}
