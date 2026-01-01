@@ -12,14 +12,7 @@ const App: React.FC = () => {
   const [error, setError] = useState<{message: string, detail?: string, code?: number, type?: 'quota' | 'auth' | 'not_found' | 'general'} | null>(null);
   const [weatherData, setWeatherData] = useState<(WeatherData & { isRealtime: boolean }) | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [diagStatus, setDiagStatus] = useState<'idle' | 'testing' | 'success' | 'failed'>('idle');
   
-  const handleDiagnostic = async () => {
-    setDiagStatus('testing');
-    const ok = await testApiConnection();
-    setDiagStatus(ok ? 'success' : 'failed');
-  };
-
   const getWeatherData = useCallback(async (target: Coordinates | string) => {
     setLoading(true);
     setError(null);
@@ -30,19 +23,12 @@ const App: React.FC = () => {
       );
       setWeatherData(data);
     } catch (err: any) {
-      console.error("Gemini Error:", err);
-      const errorMsg = err.message || String(err);
-      
-      if (errorMsg.includes("429")) {
-        setError({ 
-          message: "API 請求過於頻繁", 
-          detail: "連基礎 API 配額也已耗盡。這通常發生在短時間內重複整理網頁，請稍候 1 分鐘再試。",
-          code: 429,
-          type: 'quota'
-        });
-      } else {
-        setError({ message: "系統連線異常", detail: errorMsg, type: 'general' });
-      }
+      console.error("Gemini Critical Error:", err);
+      setError({ 
+        message: "連線暫時中斷", 
+        detail: "API 連線可能遇到問題，請檢查您的網路或金鑰狀態。 (" + (err.message || "Unknown") + ")",
+        type: 'general'
+      });
     } finally {
       setLoading(false);
     }
@@ -88,7 +74,10 @@ const App: React.FC = () => {
             <div className="bg-blue-600 p-2.5 rounded-2xl text-white shadow-lg shadow-blue-200">
               <Cloud size={20} />
             </div>
-            <h1 className="text-xl font-black text-slate-800 tracking-tight">智感天氣預報</h1>
+            <div>
+              <h1 className="text-xl font-black text-slate-800 tracking-tight">智感天氣預報</h1>
+              <span className="text-[10px] font-bold bg-slate-100 px-2 py-0.5 rounded-full text-slate-400">v2.0韌性版</span>
+            </div>
           </div>
           <form onSubmit={(e) => { e.preventDefault(); getWeatherData(searchQuery); }} className="relative w-full md:w-72">
             <input 
@@ -116,18 +105,21 @@ const App: React.FC = () => {
                 className="w-full py-5 bg-blue-600 text-white rounded-3xl font-black hover:bg-blue-700 transition-all shadow-xl shadow-blue-100 flex items-center justify-center gap-3 group"
               >
                 <RefreshCw size={20} className="group-hover:rotate-180 transition-transform duration-500" /> 
-                再次嘗試連線
+                嘗試重啟連線
             </button>
           </div>
         )}
 
         {weatherData && (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
-            {/* 非即時模式提示 */}
+            {/* 降級模式提示 */}
             {!weatherData.isRealtime && (
-              <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl mb-6 flex items-center gap-3 text-amber-800 animate-pulse">
-                <ZapOff size={20} className="shrink-0" />
-                <p className="text-sm font-bold">搜尋功能配額暫時耗盡，目前顯示的是 AI 根據歷史規律產生的預測資料，僅供參考。</p>
+              <div className="bg-amber-50 border border-amber-200 p-5 rounded-[2rem] mb-8 flex items-start gap-4 text-amber-900">
+                <div className="bg-amber-400/20 p-2 rounded-xl shrink-0"><ZapOff size={20} /></div>
+                <div>
+                  <p className="font-black text-sm mb-1">配額限制模式</p>
+                  <p className="text-xs opacity-80 leading-relaxed font-medium">目前 Google 搜尋工具已達上限，系統已自動切換至「AI 預測模式」。資料為 AI 根據歷史規律產生，若要恢復即時查詢，請於 24 小時後再試。</p>
+                </div>
               </div>
             )}
 

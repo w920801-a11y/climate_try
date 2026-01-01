@@ -15,7 +15,6 @@ export const testApiConnection = async (): Promise<boolean> => {
     });
     return response.text.includes("OK");
   } catch (e) {
-    console.error("Test connection failed:", e);
     return false;
   }
 };
@@ -32,7 +31,6 @@ export const fetchWeatherWithAI = async (
   const ai = new GoogleGenAI({ apiKey });
   const locationDesc = cityName ? `城市：${cityName}` : `座標：(${coords.lat}, ${coords.lng})`;
   
-  // 基礎 Prompt
   const prompt = `
     請查詢或推測 ${locationDesc} 的目前天氣及未來 5 天預報。
     你是一位專業的氣象主播。請務必返回一個符合以下結構的 JSON 物件（繁體中文）：
@@ -44,7 +42,7 @@ export const fetchWeatherWithAI = async (
       "clothingAdvice": "穿衣建議",
       "activityAdvice": "活動建議"
     }
-    ${!useSearch ? "注意：由於即時搜尋功能受限，請根據你的訓練資料給出最合理的預測，並在 aiInsight 開頭加上 [非即時數據] 字樣。" : ""}
+    ${!useSearch ? "注意：目前為[備用模式]，請根據你的訓練資料給出最合理的氣候預測，並在 aiInsight 字串開頭加上『(預測)』標籤。" : ""}
   `;
 
   try {
@@ -87,7 +85,6 @@ export const fetchWeatherWithAI = async (
       }
     };
 
-    // 如果允許搜尋才加入工具
     if (useSearch) {
       config.tools = [{ googleSearch: {} }];
     }
@@ -114,17 +111,16 @@ export const fetchWeatherWithAI = async (
       isRealtime: useSearch && sources.length > 0
     };
   } catch (error: any) {
-    const errorMsg = error.message || String(error);
-    
-    // 如果是搜尋配額錯誤且我們剛才嘗試過搜尋
-    if ((errorMsg.includes("429") || errorMsg.includes("SEARCH_QUOTA_EXCEEDED")) && useSearch) {
-      console.warn("搜尋配額耗盡，正在嘗試無搜尋模式...");
-      return fetchWeatherWithAI(coords, cityName, 0, false); // 自動降級為不使用搜尋
+    // 只要有任何報錯且我們原本有開搜尋，就立刻嘗試「無搜尋模式」
+    if (useSearch) {
+      console.warn("[系統] 搜尋工具異常，切換至純 AI 模式...");
+      return fetchWeatherWithAI(coords, cityName, 0, false);
     }
     
+    // 如果連純 AI 模式都掛了，才嘗試重試或拋出錯誤
     if (retries > 0) {
-      await delay(2000);
-      return fetchWeatherWithAI(coords, cityName, retries - 1, useSearch);
+      await delay(1500);
+      return fetchWeatherWithAI(coords, cityName, retries - 1, false);
     }
     throw error;
   }
